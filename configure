@@ -25,8 +25,8 @@ usage() {
       - SuperH (sh[eb][-nofpu][-fdpic])*
       - IBM S/390 (s390x)：仅支持 64 位
       - Motorola 680x0 (m68k)：仅支持硬浮动
-
   - PREFIX 与其记作前缀，不如记作根目录
+  - wrapper 译作包装器，比如直接使用的gcc就是一种包装器，它包装了预处理，汇编，编译，加密等步骤
 
 配置项：
   --srcdir=DIR            musl 源代码目录 [当前目录]
@@ -50,7 +50,7 @@ usage() {
   --enable-optimize=...   使用给定的组建以优化编译速度（并非大小） [auto] # REVIEW: 速度是使用musl的速度还是编译速度？大小也一样
   --enable-debug          启用则将以debug模式进行构建 [disabled] （也可以手动添加-g在CFLAGS。未来还可能添加更多调试功能）
   --disable-warnings      启用后构建时将输出musl推荐的警告 [enabled]
-  --enable-wrapper=...    使用给定的musl工具链包装器 [auto]
+  --enable-wrapper=...    使用给定的编译器包装器 [auto] 
   --disable-shared        在不需要libc.so时取消构建动态库libc.so；这将缩短一半的构建时间 [enabled]
   --disable-static        在不需要libc.a 时取消构建静态库libc.a ；这将缩短一半的构建时间 [enabled]
 
@@ -63,7 +63,7 @@ usage() {
   CROSS_COMPILE           交叉编译器或工具链的前缀 [none]
   LIBCC                   添加编译运行时库（译者按：在提交记录中有说在这里可以配置为llvm的工具链） [detected]
 
-使用这些变量来覆盖 configure 所做的选择。
+使用这些变量来覆盖 configure（本脚本）所做的选择。
 
 EOF
     exit 0
@@ -94,16 +94,16 @@ stripdir() {
 }
 
 trycppif() {
-    printf "checking preprocessor condition %s... " "$1"
+    printf "检查 %s 是否被预处理器接受... " "$1"
     echo "typedef int x;" >"$tmpc"
     echo "#if $1" >>"$tmpc"
     echo "#error yes" >>"$tmpc"
     echo "#endif" >>"$tmpc"
     if $CC $2 -c -o /dev/null "$tmpc" >/dev/null 2>&1; then
-        printf "false\n"
+        printf "否\n"
         return 1
     else
-        printf "true\n"
+        printf "是\n"
         return 0
     fi
 }
@@ -112,12 +112,12 @@ tryflag() {
     printf "检查标志 %s 是否被编译器接受... " "$2"
     echo "typedef int x;" >"$tmpc"
     if $CC $CFLAGS_TRY $2 -c -o /dev/null "$tmpc" >/dev/null 2>&1; then
-        printf "yes\n"
+        printf "成功\n"
         eval "$1=\"\${$1} \$2\""
         eval "$1=\${$1# }"
         return 0
     else
-        printf "no\n"
+        printf "失败\n"
         return 1
     fi
 }
@@ -126,12 +126,12 @@ tryldflag() {
     printf "检查标志 %s 是否被链接器接受... " "$2"
     echo "typedef int x;" >"$tmpc"
     if $CC $LDFLAGS_TRY -nostdlib -shared "$2" -o /dev/null "$tmpc" >/dev/null 2>&1; then
-        printf "yes\n"
+        printf "成功\n"
         eval "$1=\"\${$1} \$2\""
         eval "$1=\${$1# }"
         return 0
     else
-        printf "no\n"
+        printf "失败\n"
         return 1
     fi
 }
@@ -234,19 +234,19 @@ for i in srcdir prefix exec_prefix bindir libdir includedir syslibdir; do
 done
 
 #
-# Get the source dir for out-of-tree builds
+# 为了避免编译过程污染源代码目录，进行检查并输出一个干净的目录
 #
 if test -z "$srcdir"; then
     srcdir="${0%/configure}"
     stripdir srcdir
 fi
-abs_builddir="$(pwd)" || fail "$0: cannot determine working directory"
-abs_srcdir="$(cd $srcdir && pwd)" || fail "$0: invalid source directory $srcdir"
+abs_builddir="$(pwd)" || fail "$0: 无法确定工作目录"
+abs_srcdir="$(cd $srcdir && pwd)" || fail "$0: 无效的源代码目录 $srcdir"
 test "$abs_srcdir" = "$abs_builddir" && srcdir=.
-test "$srcdir" != "." && test -f Makefile && test ! -h Makefile && fail "$0: Makefile already exists in the working directory"
+test "$srcdir" != "." && test -f Makefile && test ! -h Makefile && fail "$0: 工作目录中已经存在 Makefile 文件"
 
 #
-# Get a temp filename we can use
+# 得到一个可用的临时文件名
 #
 i=0
 set -C
@@ -254,20 +254,20 @@ while :; do
     i=$(($i + 1))
     tmpc="./conf$$-$PPID-$i.c"
     2>|/dev/null >"$tmpc" && break
-    test "$i" -gt 50 && fail "$0: cannot create temporary file $tmpc"
+    test "$i" -gt 50 && fail "$0: 无法创建临时文件 $tmpc"
 done
 set +C
 trap 'rm "$tmpc"' EXIT INT QUIT TERM HUP
 
 #
-# Check that the requested malloc implementation exists
+# 检查要求的malloc实现是否存在
 #
 test -d "$srcdir/src/malloc/$malloc_dir" ||
-    fail "$0: error: chosen malloc implementation '$malloc_dir' does not exist"
+    fail "$0: 错误：选择的malloc实现 '$malloc_dir' 并不存在"
 
 #
-# Check whether we are cross-compiling, and set a default
-# CROSS_COMPILE prefix if none was provided.
+# 检查是否正在进行交叉编译
+# 并在 CROSS_COMPILE 为空的时候设定一个默认值
 #
 test "$target" &&
     test "$target" != "$build" &&
@@ -275,29 +275,31 @@ test "$target" &&
     CROSS_COMPILE="$target-"
 
 #
-# Find a C compiler to use
+# 找到一个可用的C编译器
 #
-printf "checking for C compiler... "
+printf "检查C编译器... "
 trycc ${CROSS_COMPILE}gcc
 trycc ${CROSS_COMPILE}c99
 trycc ${CROSS_COMPILE}cc
 printf "%s\n" "$CC"
 test -n "$CC" || {
-    echo "$0: cannot find a C compiler"
+    echo "$0: 无法找到一个正确的C编译器"
     exit 1
 }
 
-printf "checking whether C compiler works... "
+printf "检查编译器是否正常... "
 echo "typedef int x;" >"$tmpc"
 if output=$($CC $CPPFLAGS $CFLAGS -c -o /dev/null "$tmpc" 2>&1); then
-    printf "yes\n"
+    printf "成功\n"
 else
-    printf "no; compiler output follows:\n%s\n" "$output"
+    printf "失败；编译器输出为：\n%s\n" "$output"
     exit 1
 fi
 
 #
-# Figure out options to force errors on unknown flags.
+# 找出可用于强制启用未知标志的标志可选项
+# 提交记录中表示如clang这类编译器在接受未知标志时不会报错，但之后这个错误可能会在之后输出。
+# 这会破坏处理输出的程序，所以我们需要一个标志来强制启用未知标志报错。
 #
 tryflag CFLAGS_TRY -Werror=unknown-warning-option
 tryflag CFLAGS_TRY -Werror=unused-command-line-argument
@@ -306,8 +308,7 @@ tryldflag LDFLAGS_TRY -Werror=unknown-warning-option
 tryldflag LDFLAGS_TRY -Werror=unused-command-line-argument
 
 #
-# Need to know if the compiler is gcc or clang to decide which toolchain
-# wrappers to build.
+# 使用的编译器是gcc还是clang来选择使用的包装器
 #
 printf "checking for C compiler family... "
 cc_ver="$(LC_ALL=C $CC -v 2>&1)"
@@ -320,14 +321,14 @@ fi
 echo "$cc_family"
 
 #
-# Figure out toolchain wrapper to build
+# 找到用于构建的工具链包装器
 #
 if test "$wrapper" = auto || test "$wrapper" = detect; then
     echo "#include <stdlib.h>" >"$tmpc"
     echo "#if ! __GLIBC__" >>"$tmpc"
     echo "#error no" >>"$tmpc"
     echo "#endif" >>"$tmpc"
-    printf "checking for toolchain wrapper to build... "
+    printf "检查用于构建的工具链包装器... "
     if test "$wrapper" = auto && ! $CC -c -o /dev/null "$tmpc" >/dev/null 2>&1; then
         echo "none"
     elif test "$cc_family" = gcc; then
@@ -339,7 +340,7 @@ if test "$wrapper" = auto || test "$wrapper" = detect; then
     else
         echo "none"
         if test "$wrapper" = detect; then
-            fail "$0: could not find an appropriate toolchain wrapper"
+            fail "$0: 找不到一个适合的包装器"
         fi
     fi
 fi
@@ -353,17 +354,17 @@ if test "$clang_wrapper" = yes; then
 fi
 
 #
-# Find the target architecture
+# 找到编译目标平台架构
 #
-printf "checking target system type... "
+printf "检查编译目标架构类型... "
 test -n "$target" || target=$($CC -dumpmachine 2>/dev/null) || target=unknown
 printf "%s\n" "$target"
 
 #
-# Convert to just ARCH
+# $target 转化为环境变量 ARCH
 #
 case "$target" in
-# Catch these early to simplify matching for 32-bit archs
+# 尽早进行匹配，以简化 32 位架构的构建配置
 arm*) ARCH=arm ;;
 aarch64*) ARCH=aarch64 ;;
 i?86-nt32*) ARCH=nt32 ;;
@@ -383,12 +384,12 @@ riscv64*) ARCH=riscv64 ;;
 riscv32*) ARCH=riscv32 ;;
 sh[1-9bel-]* | sh | superh*) ARCH=sh ;;
 s390x*) ARCH=s390x ;;
-unknown) fail "$0: unable to detect target arch; try $0 --target=..." ;;
-*) fail "$0: unknown or unsupported target \"$target\"" ;;
+unknown) fail "$0: 无法得到编译目标架构；尝试 $0 --target=..." ;;
+*) fail "$0: 未知或不支持的结构：\"$target\"" ;;
 esac
 
 #
-# Try to get a conforming C99 freestanding environment
+# 尝试配置一个符合C99标准的freestanding环境
 #
 tryflag CFLAGS_C99FSE -std=c99
 tryflag CFLAGS_C99FSE -nostdinc
@@ -399,10 +400,9 @@ tryflag CFLAGS_C99FSE -fexcess-precision=standard ||
 tryflag CFLAGS_C99FSE -frounding-math
 
 #
-# Semantically we want to insist that our sources follow the
-# C rules for type-based aliasing, but most if not all real-world
-# compilers are known or suspected to have critical bugs in their
-# type-based aliasing analysis. See for example GCC bug 107107.
+# 关于编程语义，我们希望坚持我们的源代码遵循 C 语言的基于类型的别名规则，
+# 但大多数，甚至几乎所有的实际编译器，都已知或怀疑在其基于类型的别名分析中
+# 存在严重错误。参见 GCC 的 bug 107107。
 #
 tryflag CFLAGS_C99FSE -fno-strict-aliasing
 
