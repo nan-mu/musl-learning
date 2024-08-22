@@ -290,7 +290,7 @@ test -n "$CC" || {
 printf "检查编译器是否正常... "
 echo "typedef int x;" >"$tmpc"
 if output=$($CC $CPPFLAGS $CFLAGS -c -o /dev/null "$tmpc" 2>&1); then
-    printf "成功\n"
+    printf "是\n"
 else
     printf "失败；编译器输出为：\n%s\n" "$output"
     exit 1
@@ -310,7 +310,7 @@ tryldflag LDFLAGS_TRY -Werror=unused-command-line-argument
 #
 # 使用的编译器是gcc还是clang来选择使用的包装器
 #
-printf "checking for C compiler family... "
+printf "检查C编译器类型... "
 cc_ver="$(LC_ALL=C $CC -v 2>&1)"
 cc_family=unknown
 if fnmatch '*gcc\ version*' "$cc_ver"; then
@@ -330,7 +330,7 @@ if test "$wrapper" = auto || test "$wrapper" = detect; then
     echo "#endif" >>"$tmpc"
     printf "检查用于构建的工具链包装器... "
     if test "$wrapper" = auto && ! $CC -c -o /dev/null "$tmpc" >/dev/null 2>&1; then
-        echo "none"
+        echo "无"
     elif test "$cc_family" = gcc; then
         gcc_wrapper=yes
         echo "gcc"
@@ -338,7 +338,7 @@ if test "$wrapper" = auto || test "$wrapper" = detect; then
         clang_wrapper=yes
         echo "clang"
     else
-        echo "none"
+        echo "无"
         if test "$wrapper" = detect; then
             fail "$0: 找不到一个适合的包装器"
         fi
@@ -390,6 +390,7 @@ esac
 
 #
 # 尝试配置一个符合C99标准的freestanding环境
+# 译者按：freestanding相当于rust中的no_std（倒反天罡）
 #
 tryflag CFLAGS_C99FSE -std=c99
 tryflag CFLAGS_C99FSE -nostdinc
@@ -403,15 +404,17 @@ tryflag CFLAGS_C99FSE -frounding-math
 # 关于编程语义，我们希望坚持我们的源代码遵循 C 语言的基于类型的别名规则，
 # 但大多数，甚至几乎所有的实际编译器，都已知或怀疑在其基于类型的别名分析中
 # 存在严重错误。参见 GCC 的 bug 107107。
+# 译者按：别名规则其实是C的指针类型检查。看起来这个检查的逻辑有bug。
 #
 tryflag CFLAGS_C99FSE -fno-strict-aliasing
 
 #
-# We may use the may_alias attribute if __GNUC__ is defined, so
-# if the compiler defines __GNUC__ but does not provide it,
-# it must be defined away as part of the CFLAGS.
+# 如果定义了 __GNUC__，我们可能会使用 may_alias 属性，
+# 因此如果编译器定义了 __GNUC__ 但没有提供它，
+# 则必须在 CFLAGS 中将其定义去除。
+# 译者按：同样是别名规则的问题，may_alias是GCC对于别名规则的一种优化方案，看起来这个方案还不是一个标准
 #
-printf "checking whether compiler needs attribute((may_alias)) suppression... "
+printf "检查编译器是否需要禁用 attribute((may_alias))... "
 cat >"$tmpc" <<EOF
 typedef int
 #ifdef __GNUC__
@@ -421,46 +424,47 @@ x;
 EOF
 if $CC $CFLAGS_C99FSE $CPPFLAGS $CFLAGS \
     -c -o /dev/null "$tmpc" >/dev/null 2>&1; then
-    printf "no\n"
+    printf "否\n"
 else
-    printf "yes\n"
+    printf "是\n"
     CFLAGS_C99FSE="$CFLAGS_C99FSE -D__may_alias__="
 fi
 
 #
-# The GNU toolchain defaults to assuming unmarked files need an
-# executable stack, potentially exposing vulnerabilities in programs
-# linked with such object files. Fix this.
+# GNU 工具链默认假设未标记的文件需要一个可执行栈，
+# 这可能会在与这些目标文件链接的程序中暴露漏洞。修复此问题。
+# 译者按：
+# * 可执行栈表示在栈上允许执行代码，这是一种常见的攻击手段。
+# * -Wa表示向汇编器传递参数，--noexecstack表示不允许在栈上执行代码
 #
 tryflag CFLAGS_C99FSE -Wa,--noexecstack
 
 #
-# Check for options to disable stack protector, which needs to be
-# disabled for a few early-bootstrap translation units. If not found,
-# this is not an error; we assume the toolchain does not do ssp.
+# 检查是否有选项可以禁用栈保护器，这在一些早期引导的翻译单元中需要禁用。
+# 如果没有找到，这不是一个错误；我们假设工具链不支持栈保护。
+# 译者按：简单来说栈保护器会影响memcpy 和 memset 等函数的行为，
+# 所以在一些特殊情况下需要禁用它。以及栈保护器可能会增加一些开销。
 #
 tryflag CFLAGS_NOSSP -fno-stack-protector
 
 #
-# Check for options that may be needed to prevent the compiler from
-# generating self-referential versions of memcpy,, memmove, memcmp,
-# and memset. Really, we should add a check to determine if this
-# option is sufficient, and if not, add a macro to cripple these
-# functions with volatile...
+# 检查是否需要选项来防止编译器生成自引用版本的 memcpy、memmove、memcmp 和 memset。
+# 实际上，我们应该添加一个检查，以确定此选项是否足够，如果不够，则添加一个宏，
+# 使用 volatile 来削弱这些函数...
+# 译者按：memcpy或者memset会在循环优化的时候被调用，那么musl自己的memcpy就自引用问题了。
 #
 tryflag CFLAGS_MEMOPS -fno-tree-loop-distribute-patterns
 
 #
-# Enable debugging if requessted.
+# 根据需要启用debug模式
 #
 test "$debug" = yes && CFLAGS_AUTO=-g
 
 #
-# Preprocess asm files to add extra debugging information if debug is
-# enabled, our assembler supports the needed directives, and the
-# preprocessing script has been written for our architecture.
+# 如果启用了调试，我们的汇编器又支持所需的指令，
+# 预处理脚本也存在目标架构的处理方式，那么就在预处理汇编文件中添加额外的调试信息。
 #
-printf "checking whether we should preprocess assembly to add debugging information... "
+printf "检查是否应在预处理汇编文件中添加额外的调试信息ugging information... "
 if fnmatch '-g*|*\ -g*' "$CFLAGS_AUTO $CFLAGS" &&
     test -f "$srcdir/tools/add-cfi.$ARCH.awk" &&
     printf ".file 1 \"srcfile.s\"\n.line 1\n.cfi_startproc\n.cfi_endproc" | $CC -g -x assembler -c -o /dev/null - 2>/dev/null; then
@@ -471,29 +475,29 @@ fi
 printf "%s\n" "$ADD_CFI"
 
 #
-# Possibly add a -O option to CFLAGS and select modules to optimize with
-# -O3 based on the status of --enable-optimize and provided CFLAGS.
+# 可能向 CFLAGS 添加 -O 选项，
+# 并根据 --enable-optimize 的状态和提供的 CFLAGS 选择使用 -O3 优化的模块。
 #
-printf "checking for optimization settings... "
+printf "检查优化设置... "
 case "x$optimize" in
 xauto)
     if fnmatch '-O*|*\ -O*' "$CFLAGS_AUTO $CFLAGS"; then
-        printf "using provided CFLAGS\n"
+        printf "使用给定的 CFLAGS 设置\n"
         optimize=no
     else
-        printf "using defaults\n"
+        printf "使用默认设置\n"
         optimize=yes
     fi
     ;;
 xsize | xnone)
-    printf "minimize size\n"
+    printf "文件最小化构建\n"
     optimize=size
     ;;
 xno | x)
-    printf "disabled\n"
+    printf "禁用\n"
     optimize=no
     ;;
-*) printf "custom\n" ;;
+*) printf "自定义\n" ;;
 esac
 
 if test "$optimize" = no; then
@@ -516,7 +520,7 @@ test "$optimize" = yes && optimize="internal,malloc,string"
 if fnmatch 'no|size' "$optimize"; then
     :
 else
-    printf "components to be optimized for speed:"
+    printf "速度优化组建："
     while test "$optimize"; do
         case "$optimize" in
         *,*) this=${optimize%%,*} optimize=${optimize#*,} ;;
@@ -538,9 +542,9 @@ fi
 tryflag CFLAGS_AUTO -pipe
 
 #
-# If debugging is disabled, omit frame pointer. Modern GCC does this
-# anyway on most archs even when debugging is enabled since the frame
-# pointer is no longer needed for debugging.
+# 如果禁用了调试，则省略帧指针。现代的 GCC 即使在启用调试时也会在大多数架构上省略帧指针，
+# 因为帧指针不再是调试所必需的。
+# 译者按：从提交来看，这里所谓现代，是指2012年
 #
 if fnmatch '-g*|*\ -g*' "$CFLAGS_AUTO $CFLAGS"; then
     :
@@ -549,53 +553,50 @@ else
 fi
 
 #
-# Modern GCC wants to put DWARF tables (used for debugging and
-# unwinding) in the loaded part of the program where they are
-# unstrippable. These options force them back to debug sections (and
-# cause them not to get generated at all if debugging is off).
+# 现代的 GCC 希望将 DWARF 表（用于调试和展开）放在程序的加载部分，这部分是不可剥离的。
+# 这些选项将它们强制放回调试部分（如果调试关闭，则根本不会生成它们）。
 #
 tryflag CFLAGS_AUTO -fno-unwind-tables
 tryflag CFLAGS_AUTO -fno-asynchronous-unwind-tables
 
 #
-# Attempt to put each function and each data object in its own
-# section. This both allows additional size optimizations at link
-# time and works around a dangerous class of compiler/assembler bugs
-# whereby relative address expressions are constant-folded by the
-# assembler even when one or more of the symbols involved is
-# replaceable. See gas pr 18561 and gcc pr 66609, 68178, etc.
+# 尝试将每个函数和每个数据对象放在它们自己的段中。
+# 这不仅允许在链接时进行额外的大小优化，还能避免一类危险的编译器/汇编器错误，
+# 这些错误会导致相对地址表达式被汇编器常量折叠，即使其中一个或多个符号是可替换的。
+# 参见 gas pr 18561 和 gcc pr 66609, 68178 等。
 #
 tryflag CFLAGS_AUTO -ffunction-sections
 tryflag CFLAGS_AUTO -fdata-sections
 
+# 译者按： 这两个flag可以使得每个函数和数据对象都放在自己的段中，这样可以更好的优化代码。
+
 #
-# On x86, make sure we don't have incompatible instruction set
-# extensions enabled by default. This is bad for making static binaries.
-# We cheat and use i486 rather than i386 because i386 really does not
-# work anyway (issues with atomic ops).
-# Some build environments pass -march and -mtune options via CC, so
-# check both CC and CFLAGS.
+# 确保在 x86 上默认情况下没有启用不兼容的指令集扩展。
+# 否则不利于构建静态二进制文件。
+# 我们作弊使用 i486 而不是 i386，因为 i386 实际上无法正常工作（原子操作有问题）。
+# 上述架构配置通过 CC 传递 -march 和 -mtune 选项，因此检查 CC 和 CFLAGS。
 #
 if test "$ARCH" = "i386"; then
     fnmatch '-march=*|*\ -march=*' "$CC $CFLAGS" || tryldflag CFLAGS_AUTO -march=i486
     fnmatch '-mtune=*|*\ -mtune=*' "$CC $CFLAGS" || tryldflag CFLAGS_AUTO -mtune=generic
 fi
 
+# 译者按：以下为一些警告和报错的的flag
+
 #
-# GCC defines -w as overriding any -W options, regardless of order, but
-# clang has a bunch of annoying warnings enabled by default and needs -w
-# to start from a clean slate. So use -w if building with clang. Also
-# turn off a common on-by-default cast warning regardless of compiler.
+# GCC 定义 -w 会覆盖任何 -W 选项，无论顺序如何；
+# 但 clang 默认启用了许多烦人的警告，需要使用 -w 从头开始。
+# 因此，如果使用 clang 构建，则使用 -w。
+# 同时，无论使用哪种编译器，都关闭一个默认启用的常见类型转换警告。
 #
 test "$cc_family" = clang && tryflag CFLAGS_AUTO -w
 
 tryflag CFLAGS_AUTO -Wno-pointer-to-int-cast
 
 #
-# Even with -std=c99, gcc accepts some constructs which are constraint
-# violations. We want to treat these as errors regardless of whether
-# other purely stylistic warnings are enabled -- especially implicit
-# function declarations, which are a dangerous programming error.
+# 即使使用 -std=c99，gcc 也会接受一些违反约束的结构。
+# 我们希望将这些视为错误，而不管是否启用了其他纯粹的风格警告——
+# 尤其是隐式函数声明，这是一个危险的编程错误。
 #
 tryflag CFLAGS_AUTO -Werror=implicit-function-declaration
 tryflag CFLAGS_AUTO -Werror=implicit-int
@@ -606,10 +607,19 @@ tryflag CFLAGS_AUTO -Werror=incompatible-pointer-types
 tryflag CFLAGS_AUTO -Werror=discarded-qualifiers
 tryflag CFLAGS_AUTO -Werror=discarded-array-qualifiers
 
+# 译者按：
+#  - implicit-function-declaration: 将隐式函数声明视为错误
+#  - implicit-int: 将隐式返回类型声明为错误
+#  - pointer-sign: 将不同类型的指针符号之间的赋值视为错误
+#  - pointer-arith: 将指针算术运算视为错误
+#  - int-conversion: 将不同类型的整数之间的赋值视为错误
+#  - incompatible-pointer-types: 将不兼容的指针类型之间的赋值视为错误
+#  - discarded-qualifiers: 将损失限定符（如const、volatile）的指针赋值视为错误
+#  - discarded-array-qualifiers: 将损失限定符（如const、volatile）的数组赋值视为错误
+
 #
-# GCC ignores unused arguements by default, but Clang needs this extra
-# parameter to stop printing warnings about LDFLAGS passed during
-# compiling stage and CFLAGS passed during linking stage.
+# GCC 默认忽略未使用的参数，但 Clang 需要这个额外的参数
+# 来停止在编译阶段传递的 LDFLAGS 和在链接阶段传递的 CFLAGS 的警告。
 #
 test "$cc_family" = clang && tryflag CFLAGS_AUTO -Qunused-arguments
 
@@ -627,44 +637,61 @@ if test "x$warnings" = xyes; then
     tryflag CFLAGS_AUTO -Wunused-variable
 fi
 
-# Determine if the compiler produces position-independent code (PIC)
-# by default. If so, we don't need to compile separate object files
-# for libc.a and libc.so.
+# 译者按：
+#   - address: 在进行错误的地址比较时发出警告
+#   - array-bounds: 在数组越界时发出警告
+#   - char-subscripts: 在使用字符作为数组下标时发出警告
+#   - duplicate-decl-specifier: 在重复的声明说明符时发出警告（比如unsigned unsigned int x;）
+#   - init-self: 在使用自己初始化自己的是否发出警告
+#   - return-type: 在返回类型不匹配时发出警告
+#   - sequence-point: 警告违反序列点规则的情况，（比如 i = i++）;
+#   - strict-aliasing: 警告违反严格别名规则的情况，这可能导致未定义行为。
+#   - unused-function: 在函数定义但未使用时发出警告
+#   - unused-label: 在标签定义但未使用时发出警告
+#   - unused-variable: 在变量定义但未使用时发出警告
+
+# 确定编译器是否默认生成位置无关代码（PIC）。
+# 如果是这样，我们就不需要为 libc.a 和 libc.so 编译单独的目标文件。
 if trycppif __PIC__ "$CFLAGS_C99FSE $CPPFLAGS $CFLAGS"; then
     pic_default=yes
 else
     pic_default=no
 fi
 
-# Reduce space lost to padding for alignment purposes by sorting data
-# objects according to their alignment reqirements. This approximates
-# optimal packing.
+# 译者按：以下为一些链接器的flag
+
+# 根据数据对象的对齐要求对它们进行排序，这能够减少因对齐而浪费的空间。
+# 该操作近似于最佳打包。
 tryldflag LDFLAGS_AUTO -Wl,--sort-section,alignment
 tryldflag LDFLAGS_AUTO -Wl,--sort-common
 
-# When linking shared library, drop dummy weak definitions that were
-# replaced by strong definitions from other translation units.
+# 在链接动态库时，删除被其他翻译单元中的强定义替换的虚弱定义。
+# 译者按：虚弱定义是直接翻译的，意思是仅作为占位符这类的内容。
+# 提交中说预处理和链接都会处理这个问题但链接中处理的比较完整
 tryldflag LDFLAGS_AUTO -Wl,--gc-sections
 
-# Some patched GCC builds have these defaults messed up...
+# 一些打了补丁的 GCC 构建默认设置被搞乱了...
+# 译者按：该选项告诉链接器生成两种类型的哈希表（SysV和GNU）。
+# 从提交中也没有看懂原来的注释是什么意思。当然可能是之前几次提交
 tryldflag LDFLAGS_AUTO -Wl,--hash-style=both
 
-# Prevent linking if there are undefined symbols; if any exist,
-# libc.so will crash at runtime during relocation processing.
-# The common way this can happen is failure to link the compiler
-# runtime library; implementation error is also a possibility.
+# 如果存在未定义的符号，则阻止链接；
+# 如果存在任何未定义的符号，libc.so 在运行时进行重定位处理时会崩溃。
+# 这通常是由于未能链接编译器运行时库导致的；实现缺陷也是一种可能性。
+# 译者按：简单来说，这个bug现在还没解决
 tryldflag LDFLAGS_AUTO -Wl,--no-undefined
 
-# Avoid exporting symbols from compiler runtime libraries. They
-# should be hidden anyway, but some toolchains including old gcc
-# versions built without shared library support and pcc are broken.
+# 避免导出编译器运行时库中的符号。它们本应被隐藏，
+# 但一些工具链（包括不支持动态库的旧版 GCC 和 pcc）不能使用这个。
+# 译者按：flag的功能是删除动态库中的所有符号不将符号导入到可执行文件和动态库中
 tryldflag LDFLAGS_AUTO -Wl,--exclude-libs=ALL
 
-# Public data symbols must be interposable to allow for copy
-# relocations, but otherwise we want to bind symbols at libc link
-# time to eliminate startup relocations and PLT overhead. Use
-# --dynamic-list rather than -Bsymbolic-functions for greater
-# control over what symbols are left unbound.
+# 公共数据段的符号必须是可替换的，以允许复制重新定位，
+# 但除此之外，我们希望在 libc 链接时绑定符号，
+# 以消除启动重定位和 PLT 开销。
+# 使用 --dynamic-list 而不是 -Bsymbolic-functions，
+# 是为了更好地控制哪些符号保持未绑定状态。
+# 可替换的意思是符号未使用特殊方法处理可以直接替换。而为了减少替换的开销，他们准备了一个静态的符号链接表
 tryldflag LDFLAGS_AUTO -Wl,--dynamic-list="$srcdir/dynamic.list"
 
 # Find compiler runtime library
