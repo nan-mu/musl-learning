@@ -789,14 +789,15 @@ if test "$ARCH" = "mips64"; then
     trycppif __mips_soft_float "$t" && SUBARCH=${SUBARCH}-sf
 fi
 
+# 译者按：这里的'd'约束表示让编译器将操作数放置在特定寄存器
 if test "$ARCH" = "powerpc"; then
     trycppif "_SOFT_FLOAT || __NO_FPRS__" "$t" && SUBARCH=${SUBARCH}-sf
     printf "检查编译器是否可以在汇编代码中使用 'd' 约束... "
     echo 'double f(double x) { __asm__ ("fabs %0, %1" : "=d"(x) : "d"(x)); return x; }' >"$tmpc"
     if $CC $CFLAGS_C99FSE $CPPFLAGS $CFLAGS -c -o /dev/null "$tmpc" >/dev/null 2>&1; then
-        printf "yes\n"
+        printf "是\n"
     else
-        printf "no\n"
+        printf "否\n"
         CFLAGS_AUTO="$CFLAGS_AUTO -DBROKEN_PPC_D_ASM"
         CFLAGS_AUTO="${CFLAGS_AUTO# }"
     fi
