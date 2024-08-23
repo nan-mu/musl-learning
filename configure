@@ -112,12 +112,12 @@ tryflag() {
     printf "检查标志 %s 是否被编译器接受... " "$2"
     echo "typedef int x;" >"$tmpc"
     if $CC $CFLAGS_TRY $2 -c -o /dev/null "$tmpc" >/dev/null 2>&1; then
-        printf "成功\n"
+        printf "是\n"
         eval "$1=\"\${$1} \$2\""
         eval "$1=\${$1# }"
         return 0
     else
-        printf "失败\n"
+        printf "否\n"
         return 1
     fi
 }
