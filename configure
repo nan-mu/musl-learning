@@ -126,12 +126,12 @@ tryldflag() {
     printf "检查标志 %s 是否被链接器接受... " "$2"
     echo "typedef int x;" >"$tmpc"
     if $CC $LDFLAGS_TRY -nostdlib -shared "$2" -o /dev/null "$tmpc" >/dev/null 2>&1; then
-        printf "成功\n"
+        printf "是\n"
         eval "$1=\"\${$1} \$2\""
         eval "$1=\${$1# }"
         return 0
     else
-        printf "失败\n"
+        printf "否\n"
         return 1
     fi
 }
